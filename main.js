@@ -18,42 +18,29 @@ var render = Render.create({
 });
 
 Render.run(render);
+Engine.run(engine);
 
 var ground = Bodies.rectangle(400, 380, 810, 60, { isStatic: true });
 
 var group = Matter.Body.nextGroup(true);
 
-var node1 = Bodies.circle(400, 50, 5, {
-    collisionFilter: {group: group},
-    isStatic: true
-});
+var node1 = CreateNode(400,50);
+var node2 = CreateNode(100,50);
+var sensorNode2 = CreateActivatableNode(node2, 10);
 
 var candy = Bodies.circle(400, 100, 20, {
     collisionFilter: {group: group},
 });
 
-var rope = Matter.Composites.stack(400, 50, 10, 1, 0, 0, function (x, y) {
-    return Bodies.rectangle(x - 6, y, 12, 6, {
-        collisionFilter: { group: group },
-        chamfer: {radius: 3},
-        density: 0.005,
-        frictionAir: 0.05,
-        render: {
-            fillStyle: '#575375'
-        }
-    });
+var goal = Bodies.rectangle(600, 300, 25,25, {
+    isSensor: true,
+    isStatic: true
 });
 
-Matter.Composites.chain(rope, 0.3, 0, -0.3, 0, {
-    stiffness: 0,
-    length: 0,
-    render: {
-        visible: false
-    }
-});
+var mouse = Matter.Mouse.create(render.canvas);
+render.mouse = mouse;
 
-var mouse = Matter.Mouse.create(render.canvas),
-mouseConstraint = Matter.MouseConstraint.create(engine, {
+var mouseConstraint = Matter.MouseConstraint.create(engine, {
     mouse: mouse,
     constraint: {
         stiffness: 0.1,
@@ -63,32 +50,108 @@ mouseConstraint = Matter.MouseConstraint.create(engine, {
     }
 });
 
-render.mouse = mouse;
+World.add(world, [
+    goal, 
+    candy, 
+    ground, 
+    mouseConstraint, 
+    node1, 
+    node2, 
+    sensorNode2
+]);
 
-var constraint1 = Matter.Constraint.create({
-    bodyA: node1,
-    bodyB: rope.bodies[0],
-    render: {
-        visible: false
-    }
-});
-
-var constraint2 = Matter.Constraint.create({
-    bodyA: candy,
-    bodyB: rope.bodies[rope.bodies.length - 1],
-    length: candy.circleRadius,
-    render: {
-        visible: false
-    }
-});
-
-World.add(world, [candy, rope, ground, mouseConstraint, node1, constraint1, constraint2]);
-
+CreateRope(node1, candy);
 
 Matter.Events.on(engine, 'collisionStart', function(event){
     var pairs = event.pairs;
 
-    console.log(pairs);
+    pairs.forEach(pair => {
+        var a = pair.bodyA;
+        var b = pair.bodyB;
+        //Candy enters goal
+        //create rope between node and candy
+        if((a === candy && b === sensorNode2) || (b === candy && a === sensorNode2)){
+            CreateRope(a,b);
+        }
+        //delete rope when cut
+    });
+    
 });
 
-Engine.run(engine);
+Matter.Events.on(engine, 'collisionEnd', function(event) {
+    //Candy out of bounds condition
+});
+
+Matter.Events.on(mouseConstraint, 'mousedown', function(Event){
+    //start cutting
+});
+
+Matter.Events.on(mouseConstraint, 'mouseup', function(event){
+    //stop cutting
+});
+
+function CreateNode(x,y){
+    //create node
+    var node = Bodies.circle(x, y, 5, {
+        collisionFilter: {group: group},
+        isStatic: true
+    });
+    //create sensor (radius:number)
+    //set Event (if object candy enters sensor create rope)
+
+    return node
+}
+
+function CreateActivatableNode(node, radius){
+    var sensor = Bodies.circle(node.position.x, node.position.y, radius, {
+        isSensor: true,
+        isStatic: true,
+        render: {
+            strokeStyle: '#C44D58',
+            fillStyle: 'transparant'
+        }
+    });
+
+    return sensor;
+}
+
+function CreateRope(objectA, objectB){
+    var chain = Matter.Composites.stack(400, 50, 10, 1, 0, 0, function (x, y) {
+        return Bodies.rectangle(x - 6, y, 12, 6, {
+            collisionFilter: { group: group },
+            chamfer: {radius: 3},
+            density: 0.005,
+            frictionAir: 0.05,
+            render: {
+                fillStyle: '#575375'
+            }
+        });
+    });
+    
+    Matter.Composites.chain(chain, 0.3, 0, -0.3, 0, {
+        stiffness: 0,
+        length: 0,
+        render: {
+            visible: false
+        }
+    });
+
+    var nodeRopeConstraint = Matter.Constraint.create({
+        bodyA: objectA,
+        bodyB: chain.bodies[0],
+        render: {
+            visible: false
+        }
+    });
+    
+    var candyRopeConstraint = Matter.Constraint.create({
+        bodyA: objectB,
+        bodyB: chain.bodies[chain.bodies.length - 1],
+        length: candy.circleRadius,
+        render: {
+            visible: false
+        }
+    });
+
+    World.add(world, [chain, nodeRopeConstraint, candyRopeConstraint]);
+}
