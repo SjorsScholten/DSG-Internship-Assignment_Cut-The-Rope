@@ -1,45 +1,28 @@
 // module aliases
-var Engine = Matter.Engine,
+let Engine = Matter.Engine,
 Render = Matter.Render,
 World = Matter.World,
 Bodies = Matter.Bodies;
 
-var engine = Engine.create();
-var world = engine.world;
+const screenSize = {x: 400, y:800},
+candyRadius = 20,
+ropes = [],
+nodes = [];
 
-var render = Render.create({
-    element: document.body,
-    engine: engine,
-    options: { width: 800, height: 400, wireframes: false }
-});
-
-Render.run(render);
+let engine = Engine.create();
 Engine.run(engine);
 
-var group = Matter.Body.nextGroup(true);
-
-var ground = Bodies.rectangle(400, 380, 810, 60, { isStatic: true });
-var goal = Bodies.rectangle(600, 300, 25,25, { isSensor: true, isStatic: true });
-var candy = Bodies.circle(400, 100, 20, { collisionFilter: {group: group}});
-
-var node1 = Bodies.circle(400, 100, 10, { collisionFilter: {group: group}, isStatic: true });
-var node2 = CreateNode(100,50);
-var sensorNode2 = CreateActivatableNode(node2, 25);
-
-var ropes;
-
-//Mouse script
-var isCutting = false;
-var cuttingSensor = Matter.Bodies.circle(100,200,10, {
-  isStatic: true,
-  isSensor: true,
-  render: { strokeStyle: '#C44D58', fillStyle: 'transparent', lineWidth: 1}
+let render = Render.create({
+    element: document.body,
+    engine: engine,
+    options: { width: screenSize.x, height: screenSize.y, wireframes: false }
 });
+Render.run(render);
 
-var mouse = Matter.Mouse.create(render.canvas);
-render.mouse = mouse;
+let world = engine.world;
 
-var mouseConstraint = Matter.MouseConstraint.create(engine, {
+let mouse = Matter.Mouse.create(render.canvas),
+mouseConstraint = Matter.MouseConstraint.create(engine, {
     mouse: mouse,
     constraint: {
         stiffness: 0.1,
@@ -49,67 +32,126 @@ var mouseConstraint = Matter.MouseConstraint.create(engine, {
     }
 });
 
-//Matter.Events.on(mouseConstraint, 'mousedown', function(Event){ setCutting(true); });
-//Matter.Events.on(mouseConstraint, 'mouseup', function(event){ setCutting(false); });
-Matter.Events.on(mouseConstraint, 'mousemove', function(event){
-  //var b = event.source.body;
-  //if(b != null){
-  //  World.remove(world, event.source.body);
-  //}
+render.mouse = mouse;
+
+let levelBounds = Bodies.rectangle(
+    screenSize.x/2,
+    screenSize.y/2,
+    screenSize.x + candyRadius * 2,
+    screenSize.y + candyRadius * 2, 
+    { isStatic: true,
+    isSensor: true,
+    render: {visible: false}
 });
 
-function setCutting(value){
-  isCutting = value;
-  cuttingSensor.render.visible = isCutting;
-  if(isCutting){ mouseConstraint.body = cuttingSensor; }
-  else{ mouseConstraint.body = null; }
+var group = Matter.Body.nextGroup(true);
+
+var mouseSensor = Bodies.circle(0,0,10, {
+        isStatic: true, 
+        isSensor:true,
+        render : {fillStyle: '#cde5fd'}
+    });
+
+let ground = Bodies.rectangle(400, 380, 810, 60, { isStatic: true }),
+goal = Bodies.rectangle(200, 700, 25,25, { isSensor: true, isStatic: true, render: {fillStyle: '#FFD700'} }),
+candy = Bodies.circle(200, candyRadius, candyRadius, { collisionFilter: {group: group}, render: {fillStyle: '#F4C2C2'}});
+
+initWorld();
+
+function initWorld(){
+    World.clear(world, false);
+    
+    ropes.splice(0,ropes.length);
+    nodes.splice(0,nodes.length);
+
+    Matter.Body.setPosition(candy, {x:200, y:candyRadius});
+
+    World.add(world, [levelBounds, goal, candy, mouseSensor]);
+    World.add(world, mouseConstraint);
+    var node = CreateNode(200,100);
+    World.add(world, node);
+    World.add(world, CreateRope(candy, node, 5).array);
+    World.add(world, CreateActivatableNode(200,400, 25).array);
 }
 
-World.add(world, [ground, candy, node1, mouseConstraint]);
-World.add(world, CreateRope(candy, node1));
-World.add(world, [node2, sensorNode2]);
-World.add(world, cuttingSensor);
+Matter.Events.on(engine, 'beforeUpdate', function(){
+    if(!mouse.position.x){return;}
+    mouseSensor.render.visible = mouse.button == 0;
 
-Matter.Events.on(engine, 'collisionStart', function(event){
-    var pairs = event.pairs;
-
-    pairs.forEach(pair => {
-        var a = pair.bodyA;
-        var b = pair.bodyB;
-        //Candy enters goal
-        //create rope between node and candy
-        if((a === candy && b === sensorNode2) || (b === candy && a === sensorNode2)){
-            World.add(world, CreateRope(a,b));
-        }
-        //delete rope when cut
+    Matter.Body.setPosition(mouseSensor, {
+        x: mouse.position.x,
+        y: mouse.position.y
     });
 });
 
+Matter.Events.on(engine, 'collisionStart', function(event){
+    event.pairs.forEach(pair =>{
+        if(comparePairToObject(pair, candy, goal)){
+            Matter.Body.setStatic(candy, true);
+            console.log("youve won the game");
+        }
+
+        nodes.forEach(node => {
+            if(comparePairToObject(pair, candy, node.sensor)){
+                World.add(world, CreateRope(candy, node.node, 5).array);
+                World.remove(world, node.sensor);
+            }
+        });
+
+        if(mouse.button == 0){
+            ropes.forEach(rope => {
+                var index = rope.rope.bodies.indexOf(pair.bodyB);
+                if(index > -1){ rope.remove(); }
+            });
+        }
+    });
+})
+
 Matter.Events.on(engine, 'collisionEnd', function(event) {
-    //Candy out of bounds condition
+    event.pairs.forEach(pair => {
+        if(comparePairToObject(pair, candy, levelBounds)){
+            console.log(["candy left bounds", candy.position]);
+            initWorld();
+        }
+    });
 });
 
 function CreateNode(x,y){
     return Bodies.circle(x, y, 10, { collisionFilter: {group: group}, isStatic: true });
 }
 
-function CreateActivatableNode(node, radius){
-    var sensor = Bodies.circle(node.position.x, node.position.y, radius, {
+function CreateActivatableNode(x,y, radius){
+    var node = CreateNode(x,y),
+    sensor = Bodies.circle(node.position.x, node.position.y, radius, {
         isSensor: true,
         isStatic: true,
         render: { strokeStyle: '#C44D58', fillStyle: 'transparent', lineWidth: 1 }
-    });
-
-    return sensor;
+    }),
+    object = {node: node, sensor: sensor, array: [node, sensor]};
+    nodes.push(object);
+    return object;
 }
 
-function CreateRope(objectA, objectB){
-  var particleOptions = { friction: 0.00001, collisionFilter: { group: group }, render: { visible: false }},
-      constraintOptions = { stiffness: 1 },
-      clothrope = Matter.Composites.softBody(10, 10, 5, 1, 5, 5, false, 8, particleOptions, constraintOptions),
-      candycloth = Matter.Constraint.create({ bodyA: objectA, bodyB: clothrope.bodies[0], length: 0 }),
-      nodecloth = Matter.Constraint.create({ bodyA: objectB, bodyB: clothrope.bodies[clothrope.bodies.length -1], length: 0 }),
-      rope = [clothrope, candycloth, nodecloth];
-    console.log(['created rope', rope]);
+function comparePairToObject(pair, objectA, objectB){
+    return  (pair.bodyA === objectA && pair.bodyB === objectB) || 
+            (pair.bodyB === objectA && pair.bodyA === objectB);
+}
+
+function CreateRope(objectA, objectB, length){
+    var particleOptions = { friction: 0.00001, collisionFilter: { group: group }, render: { visible: false }},
+    constraintOptions = { stiffness: 1 },
+    clothrope = Matter.Composites.softBody(objectA.position.x, objectA.position.y, length, 1, 2, 1, false, 8, particleOptions, constraintOptions),
+    candycloth = Matter.Constraint.create({ bodyA: objectA, bodyB: clothrope.bodies[0], length: 0 }),
+    nodecloth = Matter.Constraint.create({ bodyA: objectB, bodyB: clothrope.bodies[clothrope.bodies.length -1], length: 0 }),
+    rope = {
+        rope: clothrope, 
+        objectA: candycloth, 
+        objectB: nodecloth,
+        array: [clothrope, candycloth, nodecloth],
+        remove: function(){
+            World.remove(world, this.array);
+        }
+    };
+    ropes.push(rope);
     return rope;
 }
